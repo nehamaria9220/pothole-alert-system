@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Report Pothole</title>
+
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <style>
+        body { font-family: Arial; text-align: center; }
+        #map { height: 70vh; margin-bottom: 20px; }
+        select, button { padding: 10px; font-size: 16px; margin: 10px; }
+    </style>
+</head>
+<body>
+
+<h2>Report a Pothole</h2>
+
+<div id="map"></div>
+
+<label>Select Severity:</label><br>
+
+<select id="severity">
+    <option value="Low">Low</option>
+    <option value="Medium">Medium</option>
+    <option value="High">High</option>
+</select>
+
+<br>
+<button onclick="reportPothole()">Submit Report</button>
+
+<script>
+
+const BACKEND_URL = "http://127.0.0.1:5000";
+
+const map = L.map('map').setView([0, 0], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+let userLat, userLon;
+
+// Get location
+navigator.geolocation.getCurrentPosition(position => {
+
+    userLat = position.coords.latitude;
+    userLon = position.coords.longitude;
+
+    map.setView([userLat, userLon], 16);
+
+    L.marker([userLat, userLon])
+        .addTo(map)
+        .bindPopup("📍 You are here")
+        .openPopup();
+
+}, error => {
+    alert("Location permission denied");
+});
+
+// Submit function
+function reportPothole() {
+
+    if (!userLat || !userLon) {
+        alert("Location not ready. Please wait.");
+        return;
+    }
+
+    const severity = document.getElementById("severity").value;
+
+    fetch("http://127.0.0.1:5000/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            latitude: userLat,
+            longitude: userLon,
+            severity: severity
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert("Report submitted successfully!");
+    })
+    .catch(error => {
+        console.error(error);
+        alert("Backend not reachable. Check Flask server.");
+    });
+}
+
+</script>
+
+</body>
+</html>

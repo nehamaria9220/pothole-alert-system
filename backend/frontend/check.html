@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Check Potholes</title>
+
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <style>
+        #map {
+            height: 100vh;
+        }
+
+        /* Report Panel */
+        #reportPanel {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+            width: 160px;
+        }
+
+        #reportPanel h3 {
+            margin: 0 0 10px 0;
+            text-align: center;
+        }
+
+        .report-btn {
+            width: 100%;
+            margin: 5px 0;
+            padding: 8px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            color: white;
+        }
+
+        .low { background: green; }
+        .medium { background: orange; }
+        .high { background: red; }
+
+        /* Toast Notification */
+        #toast {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: #ff4444;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            z-index: 2000;
+            pointer-events: none;
+        }
+        #toastTopLeft {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    background: #ff4444;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    z-index: 2500;
+    pointer-events: none;
+}
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="toast"></div>
+<div id="toastTopLeft"></div>
+<!-- Report Panel -->
+<div id="reportPanel">
+    <h3>Report</h3>
+    <button class="report-btn low" onclick="reportPothole('Low')">Low</button>
+    <button class="report-btn medium" onclick="reportPothole('Medium')">Medium</button>
+    <button class="report-btn high" onclick="reportPothole('High')">High</button>
+</div>
+
+<script>
+
+const BACKEND_URL = "http://127.0.0.1:5000";
+const ALERT_RADIUS = 50;
+
+const map = L.map('map').setView([0, 0], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+let userMarker;
+let potholeData = [];
+let alerted = new Set();
+let currentUserLat = null;
+let currentUserLon = null;
+
+let potholeLayer = L.layerGroup().addTo(map);
+
+
+// Toast Function
+function showToast(message) {
+    const toast = document.getElementById("toast");
+    toast.textContent = message;
+    toast.style.opacity = 1;
+
+    setTimeout(() => {
+        toast.style.opacity = 0;
+    }, 3000);
+}
+
+
+// Report Function (no popup now)
+function reportPothole(severity) {
+
+    if (currentUserLat === null || currentUserLon === null) {
+        return;
+    }
+
+    fetch(BACKEND_URL + "/report", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            latitude: currentUserLat,
+            longitude: currentUserLon,
+            severity: severity
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        loadPotholes();
+        showTopLeftToast("✅ Pothole reported successfully!");
+    })
+    .catch(error => console.error("Error reporting pothole:", error));
+}
+
+
+// Load potholes (only show within 50m)
+function loadPotholes() {
+
+    fetch(BACKEND_URL + "/get-potholes")
+        .then(res => res.json())
+        .then(data => {
+
+            potholeData = data;
+            potholeLayer.clearLayers();
+
+            if (currentUserLat !== null && currentUserLon !== null) {
+
+                data.forEach((p, index) => {
+
+                    const distance = calculateDistance(
+                        currentUserLat,
+                        currentUserLon,
+                        p.latitude,
+                        p.longitude
+                    );
+
+                    if (distance < ALERT_RADIUS) {
+
+                        let color;
+
+                        if (p.severity === "High") {
+                            color = "red";
+                        } else if (p.severity === "Medium") {
+                            color = "yellow";
+                        } else {
+                            color = "green";
+                        }
+
+                        L.circleMarker([p.latitude, p.longitude], {
+                            radius: 8,
+                            fillColor: color,
+                            color: color,
+                            fillOpacity: 0.8
+                        })
+                        .addTo(potholeLayer)
+                        .bindPopup("⚠️ " + p.severity + " Severity Pothole");
+
+                        if (!alerted.has(index)) {
+                            showToast("⚠️ Pothole within 50 meters!");
+                            alerted.add(index);
+                        }
+                    }
+
+                });
+            }
+
+        })
+        .catch(error => console.error("Error loading potholes:", error));
+}
+
+
+// ===== SIMULATION MODE =====
+
+let fakeLat = 10.0285660;
+let fakeLon = 76.3286800;
+
+setInterval(() => {
+
+    fakeLat += 0.0001;
+    fakeLon += 0.0001;
+
+    currentUserLat = fakeLat;
+    currentUserLon = fakeLon;
+
+    map.setView([fakeLat, fakeLon], 16);
+
+    if (userMarker) {
+        userMarker.setLatLng([fakeLat, fakeLon]);
+    } else {
+        userMarker = L.marker([fakeLat, fakeLon])
+            .addTo(map)
+            .bindPopup("📍 Simulated User")
+            .openPopup();
+    }
+
+    loadPotholes();
+
+}, 2000);
+
+
+// Haversine formula
+function calculateDistance(lat1, lon1, lat2, lon2) {
+
+    const R = 6371000;
+
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+
+    const a =
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(lat1*Math.PI/180) *
+        Math.cos(lat2*Math.PI/180) *
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    return R * c;
+}
+
+
+// Initial load
+loadPotholes();
+setInterval(loadPotholes, 10000);
+function showTopLeftToast(message) {
+    const toast = document.getElementById("toastTopLeft");
+
+    toast.textContent = message;
+    toast.style.opacity = 1;
+
+    setTimeout(() => {
+        toast.style.opacity = 0;
+    }, 3000);
+}
+</script>
+
+</body>
+</html>
